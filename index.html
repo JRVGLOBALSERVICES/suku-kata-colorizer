@@ -394,7 +394,6 @@
   </div>
 
   <!-- Scripts -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 
   <script>
@@ -691,65 +690,96 @@
       }, 1500);
     }
 
-    // ── PDF ─────────────────────────────────────────────────────────
-    async function savePDF() {
+    // ── PDF (Direct jsPDF — no screenshots) ─────────────────────────
+    function savePDF() {
       const btn = event.target;
       const origText = btn.textContent;
       btn.textContent = t('pdfGenerating');
       btn.disabled = true;
 
       try {
-        const outputSection = document.getElementById('outputSection');
-        outputSection.classList.add('pdf-capture');
-
-        const canvas = await html2canvas(outputSection, {
-          backgroundColor: '#ffffff',
-          scale: 2,
-          logging: false,
-          onclone: (clonedDoc) => {
-            const clonedOutput = clonedDoc.getElementById('outputSection');
-            if (clonedOutput) {
-              clonedOutput.style.padding = '40px';
-            }
-          }
-        });
-
-        outputSection.classList.remove('pdf-capture');
-
         const { jsPDF } = window.jspdf;
-        const imgData = canvas.toDataURL('image/png');
+        const doc = new jsPDF('p', 'mm', 'a4');
 
-        const pageWidth = 210;  // A4 mm
-        const pageHeight = 297;
-        const margin = 15;
-        const contentWidth = pageWidth - margin * 2;
-        const contentHeight = pageHeight - margin * 2;
+        const pageW = 210, pageH = 297;
+        const margin = 20;
+        const maxW = pageW - margin * 2;
+        const maxH = pageH - margin * 2;
+        const fontSize = 11;
+        const lineH = 7;
 
-        const imgWidth = contentWidth;
-        const imgHeight = (canvas.height * imgWidth) / canvas.width;
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(fontSize);
 
-        const pdf = new jsPDF('p', 'mm', 'a4');
-        let heightLeft = imgHeight;
-        let position = margin;
+        const text = input.value.trim();
+        if (!text) { btn.textContent = origText; btn.disabled = false; return; }
 
-        // First page
-        pdf.addImage(imgData, 'PNG', margin, position, imgWidth, Math.min(imgHeight, contentHeight));
-        heightLeft -= contentHeight;
+        const lines = text.split('\n');
+        let y = margin + 2;
+        let sylIdx = 0;
 
-        // Additional pages
-        while (heightLeft > 0) {
-          pdf.addPage();
-          position = margin - (imgHeight - heightLeft);
-          pdf.addImage(imgData, 'PNG', margin, position, imgWidth, imgHeight);
-          heightLeft -= contentHeight;
+        for (const line of lines) {
+          if (!line.trim()) { y += lineH; continue; }
+
+          const words = line.split(/\s+/);
+          let x = margin;
+          let firstWordOnLine = true;
+
+          for (const word of words) {
+            // Syllabify
+            let syllables;
+            if (mode === 'manual') {
+              syllables = word.split('-').filter(s => s.length > 0);
+              if (syllables.length === 0) syllables = [word];
+            } else {
+              syllables = syllabify(word);
+            }
+
+            // Measure word width
+            let wordW = 0;
+            const sylWidths = [];
+            for (const syl of syllables) {
+              const w = doc.getTextWidth(syl);
+              sylWidths.push(w);
+              wordW += w;
+            }
+            const spaceW = doc.getTextWidth(' ');
+
+            // Word-wrap: if word doesn't fit, go to next line
+            if (!firstWordOnLine && x + wordW > margin + maxW) {
+              y += lineH;
+              x = margin;
+              firstWordOnLine = true;
+            }
+
+            // Page break
+            if (y > margin + maxH) {
+              doc.addPage();
+              y = margin;
+              x = margin;
+            }
+
+            // Render each syllable
+            for (let si = 0; si < syllables.length; si++) {
+              const color = (sylIdx % 2 === 0) ? '#111111' : '#dc143c';
+              doc.setTextColor(color);
+              doc.text(syllables[si], x, y);
+              x += sylWidths[si];
+              sylIdx++;
+            }
+
+            x += spaceW;
+            firstWordOnLine = false;
+          }
+
+          y += lineH;
         }
 
-        pdf.save('suku-kata.pdf');
+        doc.save('suku-kata.pdf');
         btn.textContent = t('pdfDone');
       } catch (e) {
         btn.textContent = t('pdfFail');
         console.error(e);
-        outputSection.classList.remove('pdf-capture');
       }
 
       setTimeout(() => {
