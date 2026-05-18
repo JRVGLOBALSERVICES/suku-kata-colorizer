@@ -789,7 +789,21 @@
     }
 
     // ── Voice Reader ────────────────────────────────────────────────
+    let voicesLoaded = false;
+    let availableVoices = [];
+
+    function loadVoices() {
+      availableVoices = speechSynth.getVoices();
+      if (availableVoices.length > 0) voicesLoaded = true;
+    }
+    loadVoices();
+    speechSynth.onvoiceschanged = () => { loadVoices(); };
+
     function toggleVoice() {
+      if (!window.speechSynthesis) {
+        alert(lang === 'bm' ? 'Pelayar anda tidak menyokong bacaan suara.' : 'Your browser does not support speech synthesis.');
+        return;
+      }
       if (isSpeaking) {
         stopVoice();
         return;
@@ -802,6 +816,7 @@
       if (!text) return;
 
       stopVoice();
+      loadVoices(); // Refresh voices
 
       // Build syllable-by-syllable + full word reading string
       const lines = text.split('\n');
@@ -812,7 +827,6 @@
         const words = line.split(/\s+/);
 
         for (const word of words) {
-          // Only process Malay words (has letters)
           if (!/[a-zA-Z]/.test(word)) continue;
 
           let syllables;
@@ -824,10 +838,8 @@
           }
 
           if (syllables.length === 1) {
-            // Single syllable — just say the word
             parts.push(syllables[0]);
           } else {
-            // Multi-syllable: "se, la, mat, selamat."
             const sylPart = syllables.join(', ');
             parts.push(sylPart + ', ' + word);
           }
@@ -836,30 +848,53 @@
 
       if (parts.length === 0) return;
 
-      // Join with period pauses between words
       const speakText = parts.join('. ');
 
-      const utterance = new SpeechSynthesisUtterance(speakText);
-      utterance.lang = 'ms-MY';
-      utterance.rate = 0.65;  // Slower for learning
-      utterance.pitch = 1.0;
+      // Chrome sometimes needs a small delay after cancel
+      setTimeout(() => {
+        const utterance = new SpeechSynthesisUtterance(speakText);
+        utterance.lang = 'ms-MY';
+        utterance.rate = 0.65;
+        utterance.pitch = 1.0;
+        utterance.volume = 1.0;
 
-      const voices = speechSynth.getVoices();
-      const msVoice = voices.find(v => v.lang.startsWith('ms'));
-      if (msVoice) utterance.voice = msVoice;
+        // Try Malay voice, fallback to any available
+        const msVoice = availableVoices.find(v => v.lang.startsWith('ms'));
+        if (msVoice) utterance.voice = msVoice;
 
-      utterance.onstart = () => {
-        isSpeaking = true;
-        const btn = document.getElementById('voiceBtn');
-        btn.classList.add('playing');
-        document.getElementById('voiceLabel').textContent = lang === 'bm' ? 'Henti' : 'Stop';
-      };
+        let hasStarted = false;
 
-      utterance.onend = () => resetVoice();
-      utterance.onerror = () => resetVoice();
+        utterance.onstart = () => {
+          hasStarted = true;
+          isSpeaking = true;
+          const btn = document.getElementById('voiceBtn');
+          btn.classList.add('playing');
+          document.getElementById('voiceLabel').textContent = lang === 'bm' ? 'Henti' : 'Stop';
+        };
 
-      currentUtterance = utterance;
-      speechSynth.speak(utterance);
+        utterance.onend = () => resetVoice();
+        utterance.onerror = (e) => {
+          console.log('Speech error:', e.error);
+          // Fallback: try reading plain text without syllable breakdown
+          if (!hasStarted && e.error === 'synthesis-failed') {
+            const fallback = new SpeechSynthesisUtterance(input.value.trim());
+            fallback.lang = 'ms-MY';
+            fallback.rate = 0.75;
+            fallback.onstart = utterance.onstart;
+            fallback.onend = () => resetVoice();
+            fallback.onerror = () => resetVoice();
+            speechSynth.speak(fallback);
+            return;
+          }
+          resetVoice();
+        };
+
+        currentUtterance = utterance;
+        speechSynth.speak(utterance);
+
+        // Chrome bug workaround: resume if paused
+        if (speechSynth.paused) speechSynth.resume();
+      }, 50);
     }
 
     function stopVoice() {
