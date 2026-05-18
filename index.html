@@ -821,7 +821,7 @@
       if (!text) return;
       findMalayVoice();
 
-      // Build queue: syllables spoken separately with delays, then full word
+      // Build queue: letters → syllable → full word
       voiceQueue = [];
       const lines = text.split('\n');
       for (const line of lines) {
@@ -836,14 +836,19 @@
           } else {
             syllables = syllabify(word);
           }
+
           if (syllables.length === 1) {
-            voiceQueue.push({ text: syllables[0], delay: 200 });
+            // Single syllable: letters → syllable
+            const s = syllables[0];
+            for (const ch of s) voiceQueue.push({ text: ch, delay: 180 });
+            voiceQueue.push({ text: s, delay: 250 });
           } else {
-            // Each syllable separately, then full word
+            // Multi-syllable: letters → syllable for each, then full word
             for (const s of syllables) {
-              voiceQueue.push({ text: s, delay: 350 }); // 350ms gap between syllables
+              for (const ch of s) voiceQueue.push({ text: ch, delay: 180 });
+              voiceQueue.push({ text: s, delay: 300 });
             }
-            voiceQueue.push({ text: word, delay: 500 }); // 500ms before next word
+            voiceQueue.push({ text: word, delay: 500 });
           }
         }
       }
