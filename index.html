@@ -790,6 +790,17 @@
 
     // ── Voice Reader ────────────────────────────────────────────────
     let safetyTimer = null;
+    let malayVoice = null;
+
+    // Load Malay voice if available
+    function findMalayVoice() {
+      const voices = window.speechSynthesis.getVoices();
+      malayVoice = voices.find(v => v.lang.startsWith('ms')) ||
+                   voices.find(v => v.lang.startsWith('id')) ||
+                   null;
+    }
+    findMalayVoice();
+    window.speechSynthesis.onvoiceschanged = findMalayVoice;
 
     function toggleVoice() {
       if (!window.speechSynthesis) {
@@ -808,8 +819,9 @@
     function startVoice() {
       const text = input.value.trim();
       if (!text) return;
+      findMalayVoice();
 
-      // Build queue: one chunk per word (syllables + full word together)
+      // Build queue: syllables spoken separately with delays, then full word
       voiceQueue = [];
       const lines = text.split('\n');
       for (const line of lines) {
@@ -825,10 +837,13 @@
             syllables = syllabify(word);
           }
           if (syllables.length === 1) {
-            voiceQueue.push(syllables[0]);
+            voiceQueue.push({ text: syllables[0], delay: 200 });
           } else {
-            // "se, la, mat, selamat" as one utterance
-            voiceQueue.push(syllables.join(', ') + ', ' + word);
+            // Each syllable separately, then full word
+            for (const s of syllables) {
+              voiceQueue.push({ text: s, delay: 350 }); // 350ms gap between syllables
+            }
+            voiceQueue.push({ text: word, delay: 500 }); // 500ms before next word
           }
         }
       }
@@ -848,19 +863,22 @@
         return;
       }
 
-      const chunk = voiceQueue[voiceQueueIdx];
+      const item = voiceQueue[voiceQueueIdx];
       voiceQueueIdx++;
 
-      const u = new SpeechSynthesisUtterance(chunk);
-      u.rate = 0.5;
+      const u = new SpeechSynthesisUtterance(item.text);
+      u.lang = 'ms-MY';
+      u.rate = 0.45;  // Slower for clear pronunciation
       u.volume = 1.0;
+      if (malayVoice) u.voice = malayVoice;
 
       let done = false;
       const next = () => {
         if (done) return;
         done = true;
         clearTimeout(safetyTimer);
-        speakNext();
+        // Apply the delay before next chunk
+        setTimeout(() => speakNext(), item.delay);
       };
 
       u.onend = next;
@@ -868,9 +886,9 @@
 
       window.speechSynthesis.speak(u);
 
-      // Safety: if onend doesn't fire (Chrome mobile bug), force next after estimate
-      const estimatedMs = chunk.length * 80 + 300; // ~80ms per char + buffer
-      safetyTimer = setTimeout(next, Math.max(estimatedMs, 800));
+      // Safety timer: onend fallback
+      const estimatedMs = item.text.length * 100 + item.delay + 400;
+      safetyTimer = setTimeout(next, Math.max(estimatedMs, 600));
     }
 
     function resetVoice() {
