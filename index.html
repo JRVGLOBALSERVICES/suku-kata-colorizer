@@ -401,7 +401,8 @@
     let mode = 'auto';
     let lang = 'bm';
     let isSpeaking = false;
-    let currentUtterance = null;
+    let voiceQueue = [];
+    let voiceQueueIdx = 0;
 
     // ── Translations ───────────────────────────────────────────────
     const i18n = {
@@ -787,14 +788,7 @@
       }, 2000);
     }
 
-    // ── Voice Reader ────────────────────────────────────────────────
-    let availableVoices = [];
-
-    function loadVoices() {
-      availableVoices = window.speechSynthesis.getVoices();
-    }
-    loadVoices();
-    window.speechSynthesis.onvoiceschanged = loadVoices;
+    // ── Voice Reader (Queue-based for mobile Chrome) ─────────────
 
     function toggleVoice() {
       if (!window.speechSynthesis) {
@@ -811,13 +805,11 @@
     function startVoice() {
       const text = input.value.trim();
       if (!text) return;
-
       stopVoice();
-      loadVoices();
 
-      // Build syllable-by-syllable + full word reading string
+      // Build queue: one item per word's syllable breakdown
+      voiceQueue = [];
       const lines = text.split('\n');
-      const parts = [];
 
       for (const line of lines) {
         if (!line.trim()) continue;
@@ -832,54 +824,53 @@
             syllables = syllabify(word);
           }
           if (syllables.length === 1) {
-            parts.push(syllables[0]);
+            voiceQueue.push(syllables[0]);
           } else {
-            parts.push(syllables.join(', ') + ', ' + word);
+            // Queue each syllable, then the full word
+            for (const s of syllables) voiceQueue.push(s);
+            voiceQueue.push(word);
           }
         }
       }
 
-      if (parts.length === 0) return;
+      if (voiceQueue.length === 0) return;
 
-      const speakText = parts.join('. ');
-      const utterance = new SpeechSynthesisUtterance(speakText);
-      utterance.lang = 'ms-MY';
-      utterance.rate = 0.65;
-      utterance.pitch = 1.0;
-      utterance.volume = 1.0;
+      voiceQueueIdx = 0;
+      isSpeaking = true;
+      document.getElementById('voiceBtn').classList.add('playing');
+      document.getElementById('voiceLabel').textContent = lang === 'bm' ? 'Henti' : 'Stop';
 
-      // Try Malay voice
-      const msVoice = availableVoices.find(v => v.lang.startsWith('ms'));
-      if (msVoice) utterance.voice = msVoice;
+      speakNext();
+    }
 
-      utterance.onstart = () => {
-        isSpeaking = true;
-        document.getElementById('voiceBtn').classList.add('playing');
-        document.getElementById('voiceLabel').textContent = lang === 'bm' ? 'Henti' : 'Stop';
-      };
-
-      utterance.onend = () => resetVoice();
-      utterance.onerror = (e) => {
-        // Fallback: plain text without syllable breakdown
-        if (e.error === 'synthesis-failed' || e.error === 'language-unavailable') {
-          const fb = new SpeechSynthesisUtterance(input.value.trim());
-          fb.rate = 0.75;
-          fb.onstart = utterance.onstart;
-          fb.onend = () => resetVoice();
-          fb.onerror = () => resetVoice();
-          window.speechSynthesis.speak(fb);
-          return;
-        }
+    function speakNext() {
+      if (!isSpeaking || voiceQueueIdx >= voiceQueue.length) {
         resetVoice();
+        return;
+      }
+
+      const txt = voiceQueue[voiceQueueIdx];
+      voiceQueueIdx++;
+
+      const u = new SpeechSynthesisUtterance(txt);
+      u.rate = 0.55;
+      u.pitch = 1.0;
+      u.volume = 1.0;
+      // Don't force lang — use device default (more reliable on mobile)
+
+      u.onend = () => {
+        // Small pause between chunks
+        setTimeout(() => speakNext(), 120);
       };
 
-      currentUtterance = utterance;
-      window.speechSynthesis.speak(utterance);
+      u.onerror = (e) => {
+        console.log('Speech error:', e.error);
+        // Skip this chunk, try next
+        setTimeout(() => speakNext(), 100);
+      };
 
-      // Chrome bug: sometimes pauses immediately
-      setTimeout(() => {
-        if (window.speechSynthesis.paused) window.speechSynthesis.resume();
-      }, 100);
+      window.speechSynthesis.cancel(); // Clear any stuck state
+      window.speechSynthesis.speak(u);
     }
 
     function stopVoice() {
