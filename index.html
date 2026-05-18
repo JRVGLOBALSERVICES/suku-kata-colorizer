@@ -788,15 +788,15 @@
       }, 2000);
     }
 
-    // ── Voice Reader (Queue-based for mobile Chrome) ─────────────
-
+    // ── Voice Reader ────────────────────────────────────────────────
     function toggleVoice() {
       if (!window.speechSynthesis) {
-        alert(lang === 'bm' ? 'Pelayar anda tidak menyokong bacaan suara.' : 'Your browser does not support speech synthesis.');
+        alert('Speech not supported');
         return;
       }
       if (isSpeaking) {
-        stopVoice();
+        window.speechSynthesis.cancel();
+        resetVoice();
         return;
       }
       startVoice();
@@ -805,12 +805,10 @@
     function startVoice() {
       const text = input.value.trim();
       if (!text) return;
-      stopVoice();
 
-      // Build queue: one item per word's syllable breakdown
+      // Build queue: one short string per word's syllables
       voiceQueue = [];
       const lines = text.split('\n');
-
       for (const line of lines) {
         if (!line.trim()) continue;
         const words = line.split(/\s+/);
@@ -823,13 +821,8 @@
           } else {
             syllables = syllabify(word);
           }
-          if (syllables.length === 1) {
-            voiceQueue.push(syllables[0]);
-          } else {
-            // Queue each syllable, then the full word
-            for (const s of syllables) voiceQueue.push(s);
-            voiceQueue.push(word);
-          }
+          for (const s of syllables) voiceQueue.push(s);
+          if (syllables.length > 1) voiceQueue.push(word);
         }
       }
 
@@ -839,7 +832,6 @@
       isSpeaking = true;
       document.getElementById('voiceBtn').classList.add('playing');
       document.getElementById('voiceLabel').textContent = lang === 'bm' ? 'Henti' : 'Stop';
-
       speakNext();
     }
 
@@ -849,38 +841,22 @@
         return;
       }
 
-      const txt = voiceQueue[voiceQueueIdx];
+      const u = new SpeechSynthesisUtterance(voiceQueue[voiceQueueIdx]);
       voiceQueueIdx++;
-
-      const u = new SpeechSynthesisUtterance(txt);
       u.rate = 0.55;
-      u.pitch = 1.0;
       u.volume = 1.0;
-      // Don't force lang — use device default (more reliable on mobile)
 
-      u.onend = () => {
-        // Small pause between chunks
-        setTimeout(() => speakNext(), 120);
-      };
+      u.onend = () => speakNext();
+      u.onerror = () => speakNext();
 
-      u.onerror = (e) => {
-        console.log('Speech error:', e.error);
-        // Skip this chunk, try next
-        setTimeout(() => speakNext(), 100);
-      };
-
-      window.speechSynthesis.cancel(); // Clear any stuck state
+      // NO cancel() — it kills our utterance on mobile Chrome
       window.speechSynthesis.speak(u);
-    }
-
-    function stopVoice() {
-      window.speechSynthesis.cancel();
-      resetVoice();
     }
 
     function resetVoice() {
       isSpeaking = false;
-      currentUtterance = null;
+      voiceQueue = [];
+      voiceQueueIdx = 0;
       const btn = document.getElementById('voiceBtn');
       btn.classList.remove('playing');
       document.getElementById('voiceLabel').textContent = t('voiceRead');
