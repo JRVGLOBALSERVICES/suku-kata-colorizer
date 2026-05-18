@@ -806,7 +806,7 @@
       const text = input.value.trim();
       if (!text) return;
 
-      // Build queue: one short string per word's syllables
+      // Build queue
       voiceQueue = [];
       const lines = text.split('\n');
       for (const line of lines) {
@@ -832,6 +832,17 @@
       isSpeaking = true;
       document.getElementById('voiceBtn').classList.add('playing');
       document.getElementById('voiceLabel').textContent = lang === 'bm' ? 'Henti' : 'Stop';
+
+      // Diagnostic: test if speech synthesis works at all
+      const testU = new SpeechSynthesisUtterance('');
+      testU.volume = 0;
+      testU.onerror = (e) => {
+        alert('Speech error: ' + e.error + '. Check phone media volume & TTS engine.');
+        resetVoice();
+      };
+      window.speechSynthesis.speak(testU);
+      window.speechSynthesis.cancel();
+
       speakNext();
     }
 
@@ -841,15 +852,22 @@
         return;
       }
 
-      const u = new SpeechSynthesisUtterance(voiceQueue[voiceQueueIdx]);
+      const word = voiceQueue[voiceQueueIdx];
       voiceQueueIdx++;
-      u.rate = 0.55;
+
+      const u = new SpeechSynthesisUtterance(word);
+      u.rate = 0.5;
       u.volume = 1.0;
 
       u.onend = () => speakNext();
-      u.onerror = () => speakNext();
+      u.onerror = (e) => {
+        // Show first error so we can diagnose
+        if (voiceQueueIdx === 1) {
+          alert('Speech error: ' + e.error + ' — check Settings > Accessibility > Text-to-speech');
+        }
+        speakNext();
+      };
 
-      // NO cancel() — it kills our utterance on mobile Chrome
       window.speechSynthesis.speak(u);
     }
 
