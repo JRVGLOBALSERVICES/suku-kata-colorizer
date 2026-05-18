@@ -401,7 +401,6 @@
     let mode = 'auto';
     let lang = 'bm';
     let isSpeaking = false;
-    let speechSynth = window.speechSynthesis;
     let currentUtterance = null;
 
     // ── Translations ───────────────────────────────────────────────
@@ -789,15 +788,13 @@
     }
 
     // ── Voice Reader ────────────────────────────────────────────────
-    let voicesLoaded = false;
     let availableVoices = [];
 
     function loadVoices() {
-      availableVoices = speechSynth.getVoices();
-      if (availableVoices.length > 0) voicesLoaded = true;
+      availableVoices = window.speechSynthesis.getVoices();
     }
     loadVoices();
-    speechSynth.onvoiceschanged = () => { loadVoices(); };
+    window.speechSynthesis.onvoiceschanged = loadVoices;
 
     function toggleVoice() {
       if (!window.speechSynthesis) {
@@ -816,7 +813,7 @@
       if (!text) return;
 
       stopVoice();
-      loadVoices(); // Refresh voices
+      loadVoices();
 
       // Build syllable-by-syllable + full word reading string
       const lines = text.split('\n');
@@ -825,10 +822,8 @@
       for (const line of lines) {
         if (!line.trim()) continue;
         const words = line.split(/\s+/);
-
         for (const word of words) {
           if (!/[a-zA-Z]/.test(word)) continue;
-
           let syllables;
           if (mode === 'manual') {
             syllables = word.split('-').filter(s => s.length > 0);
@@ -836,12 +831,10 @@
           } else {
             syllables = syllabify(word);
           }
-
           if (syllables.length === 1) {
             parts.push(syllables[0]);
           } else {
-            const sylPart = syllables.join(', ');
-            parts.push(sylPart + ', ' + word);
+            parts.push(syllables.join(', ') + ', ' + word);
           }
         }
       }
@@ -849,56 +842,48 @@
       if (parts.length === 0) return;
 
       const speakText = parts.join('. ');
+      const utterance = new SpeechSynthesisUtterance(speakText);
+      utterance.lang = 'ms-MY';
+      utterance.rate = 0.65;
+      utterance.pitch = 1.0;
+      utterance.volume = 1.0;
 
-      // Chrome sometimes needs a small delay after cancel
+      // Try Malay voice
+      const msVoice = availableVoices.find(v => v.lang.startsWith('ms'));
+      if (msVoice) utterance.voice = msVoice;
+
+      utterance.onstart = () => {
+        isSpeaking = true;
+        document.getElementById('voiceBtn').classList.add('playing');
+        document.getElementById('voiceLabel').textContent = lang === 'bm' ? 'Henti' : 'Stop';
+      };
+
+      utterance.onend = () => resetVoice();
+      utterance.onerror = (e) => {
+        // Fallback: plain text without syllable breakdown
+        if (e.error === 'synthesis-failed' || e.error === 'language-unavailable') {
+          const fb = new SpeechSynthesisUtterance(input.value.trim());
+          fb.rate = 0.75;
+          fb.onstart = utterance.onstart;
+          fb.onend = () => resetVoice();
+          fb.onerror = () => resetVoice();
+          window.speechSynthesis.speak(fb);
+          return;
+        }
+        resetVoice();
+      };
+
+      currentUtterance = utterance;
+      window.speechSynthesis.speak(utterance);
+
+      // Chrome bug: sometimes pauses immediately
       setTimeout(() => {
-        const utterance = new SpeechSynthesisUtterance(speakText);
-        utterance.lang = 'ms-MY';
-        utterance.rate = 0.65;
-        utterance.pitch = 1.0;
-        utterance.volume = 1.0;
-
-        // Try Malay voice, fallback to any available
-        const msVoice = availableVoices.find(v => v.lang.startsWith('ms'));
-        if (msVoice) utterance.voice = msVoice;
-
-        let hasStarted = false;
-
-        utterance.onstart = () => {
-          hasStarted = true;
-          isSpeaking = true;
-          const btn = document.getElementById('voiceBtn');
-          btn.classList.add('playing');
-          document.getElementById('voiceLabel').textContent = lang === 'bm' ? 'Henti' : 'Stop';
-        };
-
-        utterance.onend = () => resetVoice();
-        utterance.onerror = (e) => {
-          console.log('Speech error:', e.error);
-          // Fallback: try reading plain text without syllable breakdown
-          if (!hasStarted && e.error === 'synthesis-failed') {
-            const fallback = new SpeechSynthesisUtterance(input.value.trim());
-            fallback.lang = 'ms-MY';
-            fallback.rate = 0.75;
-            fallback.onstart = utterance.onstart;
-            fallback.onend = () => resetVoice();
-            fallback.onerror = () => resetVoice();
-            speechSynth.speak(fallback);
-            return;
-          }
-          resetVoice();
-        };
-
-        currentUtterance = utterance;
-        speechSynth.speak(utterance);
-
-        // Chrome bug workaround: resume if paused
-        if (speechSynth.paused) speechSynth.resume();
-      }, 50);
+        if (window.speechSynthesis.paused) window.speechSynthesis.resume();
+      }, 100);
     }
 
     function stopVoice() {
-      speechSynth.cancel();
+      window.speechSynthesis.cancel();
       resetVoice();
     }
 
@@ -909,10 +894,6 @@
       btn.classList.remove('playing');
       document.getElementById('voiceLabel').textContent = t('voiceRead');
     }
-
-    // Preload voices
-    speechSynth.getVoices();
-    speechSynth.onvoiceschanged = () => speechSynth.getVoices();
 
     // ── Live render ─────────────────────────────────────────────────
     input.addEventListener('input', render);
