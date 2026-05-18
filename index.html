@@ -798,17 +798,52 @@
     }
 
     function startVoice() {
-      const text = output.innerText;
-      if (!text.trim()) return;
+      const text = input.value.trim();
+      if (!text) return;
 
-      stopVoice(); // Clear any previous
+      stopVoice();
 
-      const utterance = new SpeechSynthesisUtterance(text);
+      // Build syllable-by-syllable + full word reading string
+      const lines = text.split('\n');
+      const parts = [];
+
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        const words = line.split(/\s+/);
+
+        for (const word of words) {
+          // Only process Malay words (has letters)
+          if (!/[a-zA-Z]/.test(word)) continue;
+
+          let syllables;
+          if (mode === 'manual') {
+            syllables = word.split('-').filter(s => s.length > 0);
+            if (syllables.length === 0) syllables = [word];
+          } else {
+            syllables = syllabify(word);
+          }
+
+          if (syllables.length === 1) {
+            // Single syllable — just say the word
+            parts.push(syllables[0]);
+          } else {
+            // Multi-syllable: "se, la, mat, selamat."
+            const sylPart = syllables.join(', ');
+            parts.push(sylPart + ', ' + word);
+          }
+        }
+      }
+
+      if (parts.length === 0) return;
+
+      // Join with period pauses between words
+      const speakText = parts.join('. ');
+
+      const utterance = new SpeechSynthesisUtterance(speakText);
       utterance.lang = 'ms-MY';
-      utterance.rate = 0.75;
+      utterance.rate = 0.65;  // Slower for learning
       utterance.pitch = 1.0;
 
-      // Try to find a Malay voice
       const voices = speechSynth.getVoices();
       const msVoice = voices.find(v => v.lang.startsWith('ms'));
       if (msVoice) utterance.voice = msVoice;
